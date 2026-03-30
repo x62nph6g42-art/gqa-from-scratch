@@ -28,6 +28,8 @@ lr         = 3e-4
 # Help taken from claude to setup WandB setup
 wandb.init(
     project = "gqa-ablation",
+    id      = f"gqa_kv{n_kv_heads}",   
+    resume  = "allow",                  
     config  = {
         "vocab_size" : vocab_size,
         "d_model"    : d_model,
@@ -40,7 +42,7 @@ wandb.init(
         "steps"      : steps,
         "lr"         : lr,
     },
-    name = f"gqa_kv{n_kv_heads}"  # each ablation run gets a different name
+    name = f"gqa_kv{n_kv_heads}"
 )
 
 device = 'mps' if torch.backends.mps.is_available() else 'cpu'
