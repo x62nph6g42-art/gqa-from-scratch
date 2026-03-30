@@ -105,6 +105,7 @@ class GQA(nn.Module):
         q = q.view(B, T, self.n_heads,    self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        
 
         # RoPE on q and k only
         q = Rope_apply(q, self.cos, self.sin)
@@ -112,7 +113,7 @@ class GQA(nn.Module):
 
         # expand k,v so every q head has a matching k,v
         k = k.unsqueeze(2).expand(B, self.n_kv_heads, self.n_rep, T, self.head_dim).reshape(B, self.n_heads, T, self.head_dim)
-        v = v.unsqueeze(2).expand(B, self.n_kv_heads, self.n_rep, T, self.head_dim).reshape(B, self.n_heads, T, self.head_dim)
+        v = v.unsqueeze(2).expand(B, self.n_kv_heads, self.n_rep, T, self.head_dim).reshape(B, self.n_heads, T, self.head_dim) # I hate this
 
         # causal mask
         mask   = torch.triu(torch.ones(T, T, device=x.device), diagonal=1).bool()
@@ -153,7 +154,7 @@ class SwiGLU(nn.Module):
 #   RMSNorm -> GQA -> residual add
 #   RMSNorm -> SwiGLU -> residual add
 
-# Inspired from modern LLM Architecture
+# Inspired from modern LLM Architecture 
 
 class TransformerBlock(nn.Module):
     def __init__(self, d_model, n_heads, n_kv_heads, d_ff):
