@@ -8,7 +8,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 
-# ── Config ─────────────────────────────────────────────────────────────────────
+# config
 # vocab_size = 32000
 
 import wandb
@@ -47,7 +47,7 @@ device = 'mps' if torch.backends.mps.is_available() else 'cpu'
 print(f"using device: {device}")
 
 
-# ── RMSNorm ────────────────────────────────────────────────────────────────────
+# RMSNorm
 class RMSNorm(nn.Module):
     def __init__(self, d_model):
         super().__init__()
@@ -58,7 +58,7 @@ class RMSNorm(nn.Module):
         return self.weight * (x / rms)
 
 
-# ── RoPE ───────────────────────────────────────────────────────────────────────
+# RoPE
 def build_rope_cache(seq_len, head_dim, device):
     half     = head_dim // 2
     theta    = 1.0 / (10000 ** (torch.arange(0, half, device=device).float() / half))
@@ -77,7 +77,7 @@ def apply_rope(x, cos, sin):
                       x2 * cos + x1 * sin], dim=-1)
 
 
-# ── GQA ────────────────────────────────────────────────────────────────────────
+# GQA
 class GQA(nn.Module):
     def __init__(self, d_model, n_heads, n_kv_heads):
         super().__init__()
@@ -125,14 +125,13 @@ class GQA(nn.Module):
         return self.wo(out)
 
 
-# ── SwiGLU FFN ─────────────────────────────────────────────────────────────────
-#
+# SwiGLU
 # Normal FFN:  x -> Linear -> ReLU -> Linear
 # SwiGLU FFN: x -> two Linear projections in parallel
-#                   one goes through SiLU (gate)
-#                   multiply them together  ← this is the "gating"
-#                   then project back down
-#
+# one goes through SiLU (gate)
+# multiply them together  ← this is the "gating"
+# then project back down
+
 # Why? The gate learns to suppress or amplify parts of the signal
 # dynamically per token. Better than a fixed ReLU.
 
@@ -149,14 +148,12 @@ class SwiGLU(nn.Module):
         return self.w2(gate * up)   # element-wise multiply, then project down
 
 
-# ── Single Transformer Block ───────────────────────────────────────────────────
-#
-# Your architecture:
+# Single Transformer Block
+#   architecture:
 #   RMSNorm -> GQA -> residual add
 #   RMSNorm -> SwiGLU -> residual add
-#
-# Note: norm comes BEFORE the sublayer (pre-norm), not after.
-# This is what LLaMA does — it's more stable to train.
+
+# Inspired from modern LLM Architecture
 
 class TransformerBlock(nn.Module):
     def __init__(self, d_model, n_heads, n_kv_heads, d_ff):
@@ -174,7 +171,7 @@ class TransformerBlock(nn.Module):
         return x
 
 
-# ── Full Model ─────────────────────────────────────────────────────────────────
+# Full Model 
 class LLM(nn.Module):
     def __init__(self, vocab_size, d_model, n_layers, n_heads, n_kv_heads, d_ff):
         super().__init__()
@@ -195,7 +192,6 @@ class LLM(nn.Module):
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
         # weight tying: embedding and lm_head share the same weights
-        # common in LLMs — saves params, often improves performance
         self.lm_head.weight = self.embedding.weight
 
     def forward(self, token_ids, targets=None):
@@ -222,7 +218,7 @@ class LLM(nn.Module):
         return logits, loss
 
 
-# ── Training Setup ─────────────────────────────────────────────────────────────
+# Training Setup
 model     = LLM(vocab_size, d_model, n_layers, n_heads, n_kv_heads, d_ff).to(device)
 nn.init.normal_(model.embedding.weight, mean=0.0, std=0.02)
 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -238,22 +234,22 @@ with torch.no_grad():
     print(f"logits mean : {logits.mean().item():.2f}")
 
 
-# ── Training Loop ──────────────────────────────────────────────────────────────
+# ── Training Loop 
 # from datasets import load_dataset
 # from transformers import AutoTokenizer
 
-# ── load and tokenize once ─────────────────────────────────────────────────────
+# load and tokenize once 
 # tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 
 ds     = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
 text   = "\n".join([x for x in ds["text"] if x.strip()])  # remove blank lines
 tokens = tokenizer.encode(text)
 tokens = torch.tensor(tokens, dtype=torch.long)
-print(f"total tokens: {len(tokens):,}")   # should be ~2M tokens
+print(f"total tokens: {len(tokens):,}")  
 print(f"tokenizer_number{tokenizer.vocab_size}")
 print(f"Tokenizer min size: {(tokens.min().item())}")
 
-# ── get_batch now pulls real slices ───────────────────────────────────────────
+# get_batch now pulls real slices
 def get_batch():
     ix = torch.randint(0, len(tokens) - seq_len, (batch_size,))
     x  = torch.stack([tokens[i   : i+seq_len  ] for i in ix]).to(device)
@@ -269,10 +265,10 @@ for step in range(steps):
 
     optimizer.zero_grad()
     loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # stops exploding gradients
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # making sure gradients don't explode
     optimizer.step()
     scheduler.step()
-    if step == 100:
+    if step == 100:  # this particular block of code is build with the help of claude
         elapsed = time.time() - start
         per_step = elapsed / 100
         remaining = per_step * (steps - 100)
