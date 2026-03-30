@@ -25,7 +25,7 @@ batch_size = 32
 steps      = 5000
 lr         = 3e-4
 
-
+# Help taken from claude to setup WandB setup
 wandb.init(
     project = "gqa-ablation",
     config  = {
@@ -59,14 +59,14 @@ class RMSNorm(nn.Module):
 
 
 # RoPE
-def build_rope_cache(seq_len, head_dim, device):
+def Rope_Positional_encoding(seq_len, head_dim, device):
     half     = head_dim // 2
     theta    = 1.0 / (10000 ** (torch.arange(0, half, device=device).float() / half))
     positions = torch.arange(seq_len, device=device).float()
     freqs    = torch.outer(positions, theta)
     return freqs.cos(), freqs.sin()
 
-def apply_rope(x, cos, sin):
+def Rope_apply(x, cos, sin):
     B, H, T, D = x.shape
     half = D // 2
     x1   = x[..., :half]
@@ -91,7 +91,7 @@ class GQA(nn.Module):
         self.wv = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.wo = nn.Linear(d_model, d_model,                    bias=False)
 
-        cos, sin = build_rope_cache(seq_len, self.head_dim, device='cpu')
+        cos, sin = Rope_Positional_Encoding(seq_len, self.head_dim, device='cpu')
         self.register_buffer('cos', cos)
         self.register_buffer('sin', sin)
 
@@ -107,8 +107,8 @@ class GQA(nn.Module):
         v = v.view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
 
         # RoPE on q and k only
-        q = apply_rope(q, self.cos, self.sin)
-        k = apply_rope(k, self.cos, self.sin)
+        q = Rope_apply(q, self.cos, self.sin)
+        k = Rope_apply(k, self.cos, self.sin)
 
         # expand k,v so every q head has a matching k,v
         k = k.unsqueeze(2).expand(B, self.n_kv_heads, self.n_rep, T, self.head_dim).reshape(B, self.n_heads, T, self.head_dim)
@@ -176,10 +176,10 @@ class LLM(nn.Module):
     def __init__(self, vocab_size, d_model, n_layers, n_heads, n_kv_heads, d_ff):
         super().__init__()
 
-        # input: token ids -> float vectors
+        # input: token ids = float vectors
         self.embedding = nn.Embedding(vocab_size, d_model)
 
-        # stack of transformer blocks
+        # layers of transformer blocks
         self.layers = nn.ModuleList([
             TransformerBlock(d_model, n_heads, n_kv_heads, d_ff)
             for _ in range(n_layers)
@@ -188,7 +188,7 @@ class LLM(nn.Module):
         # final norm before logits
         self.norm_out = RMSNorm(d_model)
 
-        # project from d_model -> vocab_size to get one score per token
+        # project from d_model = vocab_size to get one score per token
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
         # weight tying: embedding and lm_head share the same weights
@@ -234,13 +234,14 @@ with torch.no_grad():
     print(f"logits mean : {logits.mean().item():.2f}")
 
 
-# ── Training Loop 
+# Training Loop 
 # from datasets import load_dataset
 # from transformers import AutoTokenizer
 
 # load and tokenize once 
 # tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 
+# This block of code is build with an assitance of claude 
 ds     = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
 text   = "\n".join([x for x in ds["text"] if x.strip()])  # remove blank lines
 tokens = tokenizer.encode(text)
@@ -248,6 +249,7 @@ tokens = torch.tensor(tokens, dtype=torch.long)
 print(f"total tokens: {len(tokens):,}")  
 print(f"tokenizer_number{tokenizer.vocab_size}")
 print(f"Tokenizer min size: {(tokens.min().item())}")
+# Till this part
 
 # get_batch now pulls real slices
 def get_batch():
