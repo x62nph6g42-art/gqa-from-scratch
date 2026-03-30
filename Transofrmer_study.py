@@ -91,7 +91,7 @@ class GQA(nn.Module):
         self.wv = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.wo = nn.Linear(d_model, d_model,                    bias=False)
 
-        cos, sin = Rope_Positional_Encoding(seq_len, self.head_dim, device='cpu')
+        cos, sin = Rope_Positional_encoding(seq_len, self.head_dim, device='cpu')
         self.register_buffer('cos', cos)
         self.register_buffer('sin', sin)
 
