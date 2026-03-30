@@ -116,6 +116,13 @@ ______
   at this scale, varying KV head count has **minimal impact on final loss**.
 
   ______
+Loss Curve
+<img width="772" height="356" alt="Screenshot 2026-03-30 at 7 04 50 PM" src="https://github.com/user-attachments/assets/fc713440-c02a-4b12-bde0-7898abbdc941" />
+
+
+
+
+  --------
 ### Setup
 
 ```bash
