@@ -8,7 +8,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 
-# config
+# Config
 # vocab_size = 32000
 
 import wandb
@@ -18,18 +18,17 @@ vocab_size = tokenizer.vocab_size
 d_model    = 256
 n_layers   = 6
 n_heads    = 8
-n_kv_heads = 2
+n_kv_heads = 1
 d_ff       = 1024
 seq_len    = 256
 batch_size = 32
-steps      = 5000
+steps      = 1000
 lr         = 3e-4
 
-# Help taken from claude to setup WandB setup
+# Waanb setup with an assistance from claude
 wandb.init(
     project = "gqa-ablation",
-    id      = f"gqa_kv{n_kv_heads}",   
-    resume  = "allow",                  
+    id      = f"gqa_kv{n_kv_heads}",  
     config  = {
         "vocab_size" : vocab_size,
         "d_model"    : d_model,
@@ -49,7 +48,7 @@ device = 'mps' if torch.backends.mps.is_available() else 'cpu'
 print(f"using device: {device}")
 
 
-# RMSNorm
+#RMSNorm
 class RMSNorm(nn.Module):
     def __init__(self, d_model):
         super().__init__()
@@ -60,8 +59,8 @@ class RMSNorm(nn.Module):
         return self.weight * (x / rms)
 
 
-# RoPE
-def Rope_Positional_encoding(seq_len, head_dim, device):
+#RoPE 
+def Rope_encoding(seq_len, head_dim, device):
     half     = head_dim // 2
     theta    = 1.0 / (10000 ** (torch.arange(0, half, device=device).float() / half))
     positions = torch.arange(seq_len, device=device).float()
@@ -79,7 +78,7 @@ def Rope_apply(x, cos, sin):
                       x2 * cos + x1 * sin], dim=-1)
 
 
-# GQA
+#GQA 
 class GQA(nn.Module):
     def __init__(self, d_model, n_heads, n_kv_heads):
         super().__init__()
@@ -93,7 +92,7 @@ class GQA(nn.Module):
         self.wv = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.wo = nn.Linear(d_model, d_model,                    bias=False)
 
-        cos, sin = Rope_Positional_encoding(seq_len, self.head_dim, device='cpu')
+        cos, sin = Rope_encoding(seq_len, self.head_dim, device='cpu')
         self.register_buffer('cos', cos)
         self.register_buffer('sin', sin)
 
@@ -107,17 +106,16 @@ class GQA(nn.Module):
         q = q.view(B, T, self.n_heads,    self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        
 
-        # RoPE on q and k only
+        #Rope on q and k only
         q = Rope_apply(q, self.cos, self.sin)
         k = Rope_apply(k, self.cos, self.sin)
 
-        # expand k,v so every q head has a matching k,v
+        #expand k,v so every q head gets a matching k,v
         k = k.unsqueeze(2).expand(B, self.n_kv_heads, self.n_rep, T, self.head_dim).reshape(B, self.n_heads, T, self.head_dim)
-        v = v.unsqueeze(2).expand(B, self.n_kv_heads, self.n_rep, T, self.head_dim).reshape(B, self.n_heads, T, self.head_dim) # I hate this
+        v = v.unsqueeze(2).expand(B, self.n_kv_heads, self.n_rep, T, self.head_dim).reshape(B, self.n_heads, T, self.head_dim)
 
-        # causal mask
+        #causal mask
         mask   = torch.triu(torch.ones(T, T, device=x.device), diagonal=1).bool()
         scores = torch.matmul(q, k.transpose(-2, -1)) * (self.head_dim ** -0.5)
         scores = scores.masked_fill(mask, float('-inf'))
@@ -128,13 +126,10 @@ class GQA(nn.Module):
         return self.wo(out)
 
 
-# SwiGLU
-# Normal FFN:  x -> Linear -> ReLU -> Linear
-# SwiGLU FFN: x -> two Linear projections in parallel
-# one goes through SiLU (gate)
-# multiply them together  ← this is the "gating"
-# then project back down
-
+# SwiGLU FFN
+# Normal FFN:  x -> Linear -> ReLU -> Linear SwiGLU FFN: x -> two Linear projections in parallel.
+# one goes through SiLU (gate) 
+# multiply them together  ← this is the "gating" then project back down
 # Why? The gate learns to suppress or amplify parts of the signal
 # dynamically per token. Better than a fixed ReLU.
 
@@ -151,12 +146,9 @@ class SwiGLU(nn.Module):
         return self.w2(gate * up)   # element-wise multiply, then project down
 
 
-# Single Transformer Block
-#   architecture:
-#   RMSNorm -> GQA -> residual add
-#   RMSNorm -> SwiGLU -> residual add
-
-# Inspired from modern LLM Architecture 
+# Single Transformer Block 
+# RMSNorm -> GQA -> residual add
+# RMSNorm -> SwiGLU -> residual add
 
 class TransformerBlock(nn.Module):
     def __init__(self, d_model, n_heads, n_kv_heads, d_ff):
@@ -174,15 +166,15 @@ class TransformerBlock(nn.Module):
         return x
 
 
-# Full Model 
+#Full Model
 class LLM(nn.Module):
     def __init__(self, vocab_size, d_model, n_layers, n_heads, n_kv_heads, d_ff):
         super().__init__()
 
-        # input: token ids = float vectors
+        # input: token ids becomes float vectors
         self.embedding = nn.Embedding(vocab_size, d_model)
 
-        # layers of transformer blocks
+        # stack of transformer blocks
         self.layers = nn.ModuleList([
             TransformerBlock(d_model, n_heads, n_kv_heads, d_ff)
             for _ in range(n_layers)
@@ -221,7 +213,7 @@ class LLM(nn.Module):
         return logits, loss
 
 
-# Training Setup
+#Training Setup
 model     = LLM(vocab_size, d_model, n_layers, n_heads, n_kv_heads, d_ff).to(device)
 nn.init.normal_(model.embedding.weight, mean=0.0, std=0.02)
 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -237,22 +229,21 @@ with torch.no_grad():
     print(f"logits mean : {logits.mean().item():.2f}")
 
 
-# Training Loop 
+# Training Loop
 # from datasets import load_dataset
 # from transformers import AutoTokenizer
 
-# load and tokenize once 
+# load and tokenize once
 # tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 
-# This block of code is build with an assitance of claude 
+# Lines from 240 - 242 written with an assitance of claude
 ds     = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
-text   = "\n".join([x for x in ds["text"] if x.strip()])  # remove blank lines
+text   = "\n".join([x for x in ds["text"] if x.strip()])  
 tokens = tokenizer.encode(text)
 tokens = torch.tensor(tokens, dtype=torch.long)
-print(f"total tokens: {len(tokens):,}")  
+print(f"total tokens: {len(tokens):,}")   # should be 2M tokens
 print(f"tokenizer_number{tokenizer.vocab_size}")
 print(f"Tokenizer min size: {(tokens.min().item())}")
-# Till this part
 
 # get_batch now pulls real slices
 def get_batch():
@@ -270,27 +261,25 @@ for step in range(steps):
 
     optimizer.zero_grad()
     loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # making sure gradients don't explode
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)# Stoping gradints from exploding
     optimizer.step()
     scheduler.step()
-    if step == 100:  # this particular block of code is build with the help of claude
+    if step == 100:
         elapsed = time.time() - start
         per_step = elapsed / 100
         remaining = per_step * (steps - 100)
         print(f"time per step : {per_step:.2f}s")
         print(f"estimated total : {remaining/60:.1f} mins")
 
+
     if step % 100 == 0:
-        print(f"step {step:4d} | loss {loss.item():.4f} | lr {scheduler.get_last_lr()[0]:.6f}")
-
-
-    if step % 10 == 0:
-       wandb.log({
-        "loss" : loss.item(),
-        "lr"   : scheduler.get_last_lr()[0],
-        "step" : step,
-    })
-    print(f"step {step:4d} | loss {loss.item():.4f} | lr {scheduler.get_last_lr()[0]:.6f}", flush=True)
+            wandb.log({
+                "loss" : loss.item(),
+                "lr"   : scheduler.get_last_lr()[0],
+                "step" : step,
+            })
+            print(f"step {step:4d} | loss {loss.item():.4f} | lr {scheduler.get_last_lr()[0]:.6f}", flush=True)
 
 # at the very end of training
 wandb.finish()
+
